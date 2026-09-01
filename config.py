@@ -32,6 +32,23 @@ class ProductionConfig(Config):
     if _db.startswith('postgres://'): _db = _db.replace('postgres://', 'postgresql://', 1)
     SQLALCHEMY_DATABASE_URI = _db
 
+    # Connection pooling — sebelumnya belum diset sama sekali, jadi SQLAlchemy
+    # pakai default pool yang kecil (bisa jadi bottleneck/connection-refused
+    # saat traffic naik). pool_pre_ping penting untuk buang koneksi mati
+    # (misal setelah database di-restart atau idle timeout dari provider
+    # hosting) sebelum dipakai, supaya request tidak gagal karena "koneksi
+    # basi". Cuma untuk Postgres — kalau _db masih fallback ke sqlite, opsi
+    # ini tetap aman (SQLAlchemy abaikan sebagian opsi yang tidak relevan
+    # untuk dialect SQLite, tapi tetap lebih aman eksplisit hanya di sini).
+    if not _db.startswith('sqlite'):
+        SQLALCHEMY_ENGINE_OPTIONS = {
+            'pool_size': int(os.environ.get('DB_POOL_SIZE', 10)),
+            'max_overflow': int(os.environ.get('DB_MAX_OVERFLOW', 20)),
+            'pool_timeout': 30,
+            'pool_recycle': 1800,   # daur ulang koneksi tiap 30 menit
+            'pool_pre_ping': True,  # cek koneksi masih hidup sebelum dipakai
+        }
+
 config = {
     'development': DevelopmentConfig,
     'production':  ProductionConfig,

@@ -119,8 +119,18 @@ if "user_trees" in tables:
     add_col("user_trees","xp","REAL","0")
     add_col("user_trees","health","INTEGER","100")
     add_col("user_trees","pupuk_today","INTEGER","0")
+    add_col("user_trees","weather_checked_date","DATE",None)
+    add_col("user_trees","weather_condition","VARCHAR(20)",None)
     n = cur.execute("SELECT COUNT(*) FROM user_trees").fetchone()[0]
     print(f"  → {n} pohon ditemukan")
+
+print("\n[user_animals — kolom mining]")
+if "user_animals" in tables:
+    add_col("user_animals","last_mined","DATETIME",None)
+    add_col("user_animals","mining_session_start","DATETIME",None)
+    add_col("user_animals","mining_mode","VARCHAR(10)",None)
+    n = cur.execute("SELECT COUNT(*) FROM user_animals").fetchone()[0]
+    print(f"  → {n} hewan ditemukan")
 
 print("\n[referrals]")
 if "referrals" in tables:
@@ -178,6 +188,27 @@ cur.execute("""
     )
 """)
 print("  ✓ streak_logs")
+
+# ── Index untuk mempercepat query yang paling sering dipakai ─────────────
+# CREATE INDEX IF NOT EXISTS aman dipanggil berkali-kali (idempotent),
+# konsisten dengan gaya skrip ini.
+print("\n[index — mempercepat query yang sering dipakai]")
+INDEXES = [
+    ("idx_users_role_banned",   "users",           "role, is_banned"),
+    ("idx_wallets_balance",     "wallets",          "balance"),
+    ("idx_dns_tx_timestamp",    "dns_transactions", "timestamp"),
+    ("idx_dns_tx_sender",       "dns_transactions", "sender_wallet"),
+    ("idx_dns_tx_receiver",     "dns_transactions", "receiver_wallet"),
+    ("idx_quests_user_date",    "quests",           "user_id, date"),
+]
+for idx_name, table, cols in INDEXES:
+    if table in tables:
+        try:
+            cur.execute(f"CREATE INDEX IF NOT EXISTS {idx_name} ON {table}({cols})")
+            print(f"  ✓ {idx_name} ON {table}({cols})")
+            fixes += 1
+        except Exception as e:
+            print(f"  ! {idx_name}: {e}")
 
 conn.commit()
 conn.close()

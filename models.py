@@ -12,7 +12,7 @@ class User(UserMixin, db.Model):
     email           = db.Column(db.String(120), unique=True, nullable=False)
     username        = db.Column(db.String(64), unique=True, nullable=False)
     password_hash   = db.Column(db.String(256))
-    role            = db.Column(db.String(16), default='user')  # user|admin
+    role            = db.Column(db.String(16), default='user', index=True)  # user|admin
     level           = db.Column(db.Integer, default=1)
     xp              = db.Column(db.Integer, default=0)
     o2_total        = db.Column(db.Float, default=0.0)   # O2 kumulatif
@@ -27,15 +27,23 @@ class User(UserMixin, db.Model):
     created_at      = db.Column(db.DateTime, default=datetime.utcnow)
     last_login      = db.Column(db.DateTime, default=datetime.utcnow)
     guild_id        = db.Column(db.Integer, db.ForeignKey('guilds.id'), nullable=True)
-    is_banned       = db.Column(db.Boolean, default=False)
+    is_banned       = db.Column(db.Boolean, default=False, index=True)
     onboarding_done = db.Column(db.Boolean, default=False)
-    verified       = db.Column(db.Boolean, default=True)   # auto verified, tidak perlu approval admin
+    verified        = db.Column(db.Boolean, default=True)   # auto verified, tidak perlu approval admin
+
+    __table_args__ = (
+        # Kombinasi (role, is_banned) inilah yang paling sering dipakai bareng
+        # di query (leaderboard, admin dashboard, seed quest harian, dll).
+        db.Index('ix_users_role_banned', 'role', 'is_banned'),
+    )
+
 
     wallet      = db.relationship('Wallet', backref='user', uselist=False, cascade='all,delete')
     trees       = db.relationship('UserTree', backref='owner', lazy='dynamic', cascade='all,delete')
     animals     = db.relationship('UserAnimal', backref='owner', lazy='dynamic', cascade='all,delete')
     quests      = db.relationship('Quest', backref='user', lazy='dynamic', cascade='all,delete')
     inventory   = db.relationship('InventoryItem', backref='owner', lazy='dynamic', cascade='all,delete')
+    character   = db.relationship('Character', backref='user', uselist=False, cascade='all,delete')
 
     def set_password(self, pw): self.password_hash = generate_password_hash(pw)
     def check_password(self, pw): return check_password_hash(self.password_hash, pw)
@@ -63,7 +71,7 @@ class Wallet(db.Model):
     id          = db.Column(db.Integer, primary_key=True)
     user_id     = db.Column(db.Integer, db.ForeignKey('users.id'), unique=True, nullable=False)
     address     = db.Column(db.String(16), unique=True, nullable=False)  # PK-XXXXXXXX
-    balance     = db.Column(db.Float, default=0.0)
+    balance     = db.Column(db.Float, default=0.0, index=True)
     total_earned= db.Column(db.Float, default=0.0)
     total_spent = db.Column(db.Float, default=0.0)
     created_at  = db.Column(db.DateTime, default=datetime.utcnow)
@@ -82,8 +90,6 @@ class Wallet(db.Model):
 
     def is_pin_locked(self) -> bool:
         return bool(self.pin_locked_until and self.pin_locked_until > datetime.utcnow())
-    # ── Keamanan wallet ──────────────────────────
-
 
     def add_dns(self, amount: float, note: str = "", tx_type: str = "harvest"):
         if amount <= 0: return
@@ -135,12 +141,12 @@ class DNSTransaction(db.Model):
     block_number    = db.Column(db.Integer, nullable=False, unique=True)
     prev_hash       = db.Column(db.String(64))
     block_hash      = db.Column(db.String(64), nullable=False)
-    sender_wallet   = db.Column(db.String(20))
-    receiver_wallet = db.Column(db.String(20))
+    sender_wallet   = db.Column(db.String(20), index=True)
+    receiver_wallet = db.Column(db.String(20), index=True)
     amount          = db.Column(db.Float, nullable=False)
     tx_type         = db.Column(db.String(32))  # harvest/quest/trade/transfer/burn/airdrop
     note            = db.Column(db.String(256), default='')
-    timestamp       = db.Column(db.DateTime, default=datetime.utcnow)
+    timestamp       = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
 # ─── DNS SUPPLY (singleton) ───────────────────────────────────
 class DNSSupply(db.Model):
@@ -165,8 +171,6 @@ class DistributionWallet(db.Model):
     balance     = db.Column(db.Float)
     disbursed   = db.Column(db.Float, default=0.0)  # sudah didistribusikan ke player
     created_at  = db.Column(db.DateTime, default=datetime.utcnow)
-    # ── Keamanan wallet ──────────────────────────
-
 
 # ─── GUILD ────────────────────────────────────────────────────
 class Guild(db.Model):
@@ -177,8 +181,6 @@ class Guild(db.Model):
     leader_id   = db.Column(db.Integer, nullable=False)
     total_xp    = db.Column(db.Integer, default=0)
     created_at  = db.Column(db.DateTime, default=datetime.utcnow)
-    # ── Keamanan wallet ──────────────────────────
-
     members     = db.relationship('User', backref='guild', lazy='dynamic')
 
 # ─── TREE ─────────────────────────────────────────────────────
@@ -202,12 +204,116 @@ class UserTree(db.Model):
     selfie_path     = db.Column(db.String(256), default='')
     planted_at      = db.Column(db.DateTime, default=datetime.utcnow)
     total_o2        = db.Column(db.Float, default=0.0)
-    rarity      = db.Column(db.String(20), default='common')
-    animals         = db.relationship('UserAnimal', backref='tree', lazy='dynamic')
+    rarity          = db.Column(db.String(20), default='common')
+    weather_checked_date = db.Column(db.Date, nullable=True)
+    weather_condition    = db.Column(db.String(20), nullable=True)  # rain/heat/normal — buat ditampilkan di UI
+    
+    # PERBAIKAN CASCADE MENCEGAH DATA TABRAKAN (ORPHAN DATA)
+    animals         = db.relationship('UserAnimal', backref='tree', lazy='dynamic', cascade='save-update, merge')
 
     @property
     def animal_xp_bonus(self):
         return sum(a.xp_contribution for a in self.animals.filter_by(is_active=True))
+
+    # ─── PERTUMBUHAN OTOMATIS (baru) ───────────────────────────
+    def sync_growth(self):
+        """
+        Pertumbuhan pohon otomatis berbasis WAKTU sejak ditanam (planted_at):
+        dalam 30 hari, pohon pasti mencapai stage maksimal (dewasa penuh),
+        walaupun tidak pernah disiram/dipupuk sama sekali.
+
+        Siram/pupuk/panen (yang menambah `xp` pohon) tetap dihitung dan bisa
+        MEMPERCEPAT pertumbuhan kalau progres XP sudah melampaui progres waktu —
+        jadi tombol siram & pupuk tetap punya efek nyata, bukan cuma dekorasi.
+
+        Fungsi ini aman dipanggil berkali-kali (idempotent) dan sengaja dipanggil
+        di setiap halaman/route yang menampilkan atau menyentuh pohon (dashboard,
+        my-trees, gallery, siram, pupuk, panen) — sehingga pohon LAMA yang sudah
+        ditanam >30 hari sebelum fitur ini ada pun otomatis ter-upgrade jadi
+        dewasa begitu pertama kali dibuka lagi, tanpa perlu migrasi/skrip manual.
+
+        Tidak menambah kolom database baru — hanya memakai `stage`, `xp`, dan
+        `planted_at` yang sudah ada di tabel user_trees.
+        """
+        from catalog import get_tree, get_xp_progress
+
+        td = get_tree(self.tree_id)
+        if not td:
+            return self.stage or 1
+
+        max_stage = td.get("max_stage", 4) or 4
+        xp_table  = td.get("xp_per_stage", []) or []
+        planted   = self.planted_at or datetime.utcnow()
+
+        elapsed_days = (datetime.utcnow() - planted).total_seconds() / 86400.0
+        elapsed_days = max(0.0, elapsed_days)
+
+        # 1) Stage berbasis waktu — otomatis penuh (max_stage) dalam 30 hari
+        if max_stage > 1:
+            interval = 30.0 / (max_stage - 1)
+            time_stage = 1 + int(elapsed_days // interval)
+        else:
+            time_stage = max_stage
+        time_stage = max(1, min(max_stage, time_stage))
+
+        # 2) Stage berbasis XP (dari siram/pupuk/panen) — dipakai kalau lebih cepat
+        xp_stage = get_xp_progress(self.xp, self.tree_id).get("stage", 1)
+
+        # 3) Pakai yang tertinggi, dan stage tidak pernah mundur
+        final_stage = max(time_stage, xp_stage, self.stage or 1)
+        final_stage = min(final_stage, max_stage)
+
+        if final_stage != self.stage:
+            self.stage = final_stage
+
+        # Samakan XP minimum supaya progress bar & estimasi panen di UI
+        # (yang dihitung dari cat.get_xp_progress(ut.xp, ...)) konsisten
+        # dengan stage hasil pertumbuhan otomatis berbasis waktu.
+        if xp_table and final_stage > xp_stage:
+            min_xp_needed = sum(xp_table[:final_stage - 1])
+            if self.xp < min_xp_needed:
+                self.xp = min_xp_needed
+
+        return self.stage
+
+    # ─── CUACA NYATA (baru) ─────────────────────────────────────
+    def sync_weather(self):
+        """
+        Cek cuaca ASLI di lokasi pohon (lat/lng sungguhan dari GPS saat
+        ditanam) — MAKSIMAL 1x per hari per pohon (ditandai lewat
+        weather_checked_date), supaya tidak memanggil API cuaca berkali-kali
+        tiap kali dashboard/route dibuka (jaga performa & tidak menambah
+        latensi di luar hari pertama cek).
+
+        Efek gameplay:
+          - Cuaca hujan di lokasi pohon  -> +8 kesehatan (dianggap tersiram alami)
+          - Gelombang panas & pohon belum disiram hari itu -> -5 kesehatan
+
+        Kalau API cuaca gagal/timeout/lat-lng kosong, fungsi ini diam-diam
+        tidak melakukan apa-apa — fitur ini bonus, tidak boleh sampai
+        mengganggu gameplay inti (siram/pupuk/panen tetap jalan normal).
+
+        Return: "rain" | "heat" | "normal" | None (None = belum/gagal cek)
+        """
+        today = date.today()
+        if self.weather_checked_date == today:
+            return self.weather_condition
+
+        from weather import get_current_weather
+        w = get_current_weather(self.lat, self.lng)
+        if not w:
+            return None
+
+        self.weather_checked_date = today
+        self.weather_condition = w["condition"]
+
+        if w["condition"] == "rain":
+            self.health = min(100, self.health + 8)
+        elif w["condition"] == "heat" and (self.water_today or 0) == 0:
+            self.health = max(0, self.health - 5)
+
+        return self.weather_condition
+
 
 # ─── TREE LOCATION ────────────────────────────────────────────
 class TreeLocation(db.Model):
@@ -266,22 +372,72 @@ class UserAnimal(db.Model):
     is_active       = db.Column(db.Boolean, default=True)
     adopted_at      = db.Column(db.DateTime, default=datetime.utcnow)
     last_fed        = db.Column(db.DateTime, nullable=True)
+    last_mined      = db.Column(db.DateTime, nullable=True)
+    mining_session_start = db.Column(db.DateTime, nullable=True)
+    mining_mode          = db.Column(db.String(10), nullable=True)  # "aman" atau "dalam" — dikunci sejak sesi dimulai
 
     @property
     def catalog(self):
         from catalog import ANIMAL_CATALOG
         return ANIMAL_CATALOG.get(self.animal_key, {})
-    @property
-    def display_name(self): return self.nickname or self.catalog.get('name', self.animal_key)
 
-    def feed(self, food, from_tree=False):
+    @property
+    def display_name(self): 
+        return self.nickname or self.catalog.get('name', self.animal_key)
+
+    def feed(self, food_key, from_tree=False):
+        """Fungsi makan yang sudah diperbaiki agar tidak tabrakan dan memiliki validasi."""
+        # 1. Mencegah eksploitasi Spam (Cooldown 1 Jam)
+        if self.last_fed:
+            time_diff = (datetime.utcnow() - self.last_fed).total_seconds()
+            if time_diff < 3600: # 3600 detik = 1 jam
+                return False, "Hewan masih kenyang, tunggu beberapa saat lagi!"
+
+        # 2. Validasi Kecocokan Makanan dari Catalog
+        cat = self.catalog
+        valid_foods = cat.get('foods_tree', []) if from_tree else cat.get('foods_shop', [])
+        
+        # Cek apakah makanan ada di daftar kesukaan hewan (jika daftarnya ada)
+        if len(valid_foods) > 0 and food_key not in valid_foods:
+            return False, f"{self.display_name} tidak memakan makanan jenis ini!"
+
+        # 3. Kalkulasi Bonus berdasarkan kualitas makanan
         bonus = 1.25 if from_tree else 1.0
-        self.hunger    = min(100, self.hunger + int(15*bonus))
-        self.happiness = min(100, self.happiness + 5)
-        self.bond      = min(100, self.bond + int(10*bonus))
+        add_hunger = 15
+        add_happy = 5
+        add_bond = 10
+        
+        # Mengambil efek makanan dari SHOP_ITEMS jika dari toko
+        if not from_tree:
+            from catalog import SHOP_ITEMS
+            food_data = SHOP_ITEMS.get(food_key, {})
+            rarity = food_data.get('rarity', 'common')
+            
+            # Dinamis sesuai rarity makanan dari toko
+            if rarity == 'uncommon': add_hunger, add_happy = 20, 10
+            elif rarity == 'rare': add_hunger, add_happy = 40, 15
+            elif rarity == 'epic': add_hunger, add_happy = 60, 25
+            elif rarity in ['legendary', 'mythic', 'divine']: 
+                add_hunger, add_happy, add_bond = 100, 100, 50
+
+        # 4. Update Status Hewan
+        self.hunger    = min(100, self.hunger + int(add_hunger * bonus))
+        self.happiness = min(100, self.happiness + int(add_happy * bonus))
+        self.bond      = min(100, self.bond + int(add_bond * bonus))
         self.last_fed  = datetime.utcnow()
-        base = self.catalog.get('xp', 0)
+        
+        # 5. Evolusi Otomatis Ukuran (Size) Berdasarkan Bond
+        sizes = cat.get('sizes', ['bayi'])
+        if self.bond >= 80 and len(sizes) >= 4: self.size = sizes[3]
+        elif self.bond >= 50 and len(sizes) >= 3: self.size = sizes[2]
+        elif self.bond >= 20 and len(sizes) >= 2: self.size = sizes[1]
+        
+        # 6. Hitung ulang XP Contribution
+        base = cat.get('xp', 0)
         self.xp_contribution = int(base * (0.5 + self.bond/200))
+        
+        return True, f"Berhasil memberi makan {self.display_name}!"
+
 
 # ─── MARKET ───────────────────────────────────────────────────
 class MarketListing(db.Model):
@@ -299,7 +455,6 @@ class MarketListing(db.Model):
     xp_contrib  = db.Column(db.Integer, default=0)
     is_active   = db.Column(db.Boolean, default=True)
     created_at  = db.Column(db.DateTime, default=datetime.utcnow)
-    # ── Keamanan wallet ──────────────────────────
 
     expires_at  = db.Column(db.DateTime, nullable=True)
     sold_at     = db.Column(db.DateTime, nullable=True)
@@ -320,8 +475,6 @@ class Transaction(db.Model):
     fee_dns     = db.Column(db.Float)
     net_dns     = db.Column(db.Float)
     created_at  = db.Column(db.DateTime, default=datetime.utcnow)
-    # ── Keamanan wallet ──────────────────────────
-
 
 # ─── QUEST ────────────────────────────────────────────────────
 class Quest(db.Model):
@@ -337,6 +490,13 @@ class Quest(db.Model):
     reward_xp   = db.Column(db.Integer, default=50)
     is_done     = db.Column(db.Boolean, default=False)
     date        = db.Column(db.Date, default=date.today)
+
+    __table_args__ = (
+        # Kombinasi (user_id, date) inilah yang selalu dipakai bareng —
+        # cek quest harian user & seeding quest baru per hari.
+        db.Index('ix_quests_user_date', 'user_id', 'date'),
+    )
+
     @property
     def percent(self): return min(100, int(self.progress/max(1,self.target)*100))
 
@@ -376,8 +536,6 @@ class Referral(db.Model):
     referrer_id  = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     referred_id  = db.Column(db.Integer, db.ForeignKey('users.id'), unique=True)
     reward_given = db.Column(db.Boolean, default=False)
-    dns_reward   = db.Column(db.Float, default=500.0)
-    created_at   = db.Column(db.DateTime, default=datetime.utcnow)
     referrer     = db.relationship('User', foreign_keys=[referrer_id], backref='referrals_given')
     referred     = db.relationship('User', foreign_keys=[referred_id], backref='referral_received', uselist=False)
     # Step-based reward tracking
@@ -385,7 +543,7 @@ class Referral(db.Model):
     step2_given  = db.Column(db.Boolean, default=False)   # tanam pohon +200
     step3_given  = db.Column(db.Boolean, default=False)   # panen ke-3  +300
     harvest_count= db.Column(db.Integer, default=0)       # jumlah panen referred
-    dns_reward   = db.Column(db.Float,   default=0.0)
+    dns_reward   = db.Column(db.Float,   default=0.0)      # akumulasi bonus DNS yang sudah diberikan lewat step1-3
     created_at   = db.Column(db.DateTime, default=datetime.utcnow)
 
 class StreakLog(db.Model):
@@ -395,3 +553,127 @@ class StreakLog(db.Model):
     user_id  = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     log_date = db.Column(db.Date, default=date.today, nullable=False)
     dns_bonus= db.Column(db.Float, default=0.0)
+
+# ═══════════════════════════════════════════════════════════════════
+# CHARACTER SYSTEM — fondasi avatar, skill & tas petualangan
+#
+# Prinsip desain: SEMUA definisi visual (sprite sheet, ukuran frame,
+# animasi jalan) TIDAK disimpan di database, tapi di ASSET_PACKS
+# (lihat character_catalog.py). Baris DB cuma nyimpen "pakai pack yang
+# mana" (asset_pack, default 'placeholder'). Jadi kalau nanti beli/pakai
+# aset pixel-art baru: cukup tambah 1 entry di character_catalog.py +
+# taruh file gambar di static/ — TIDAK PERLU migrasi database maupun
+# ubah kode karakter yang sudah jalan.
+# ═══════════════════════════════════════════════════════════════════
+
+class Character(db.Model):
+    """Avatar per-user — posisi di dunia, penampilan, dan progres dasar."""
+    __tablename__ = 'characters'
+    id          = db.Column(db.Integer, primary_key=True)
+    user_id     = db.Column(db.Integer, db.ForeignKey('users.id'), unique=True, nullable=False)
+
+    # Lokasi di dunia game (BUKAN GPS asli — ini peta virtual terpisah)
+    map_key     = db.Column(db.String(32), default='home')   # 'home' | 'forest' (masa depan) | dst
+    pos_x       = db.Column(db.Integer, default=5)            # posisi grid/tile, bukan pixel
+    pos_y       = db.Column(db.Integer, default=5)
+    direction   = db.Column(db.String(8), default='down')     # down|up|left|right
+
+    # Penampilan — key ke ASSET_PACKS[asset_pack]['layers'][...]
+    # Placeholder sekarang cuma pakai warna, tapi struktur sudah siap
+    # untuk sprite sheet berlapis (badan, rambut, baju, topi, dst).
+    asset_pack  = db.Column(db.String(32), default='chibi_v1')
+    sprite_variant = db.Column(db.String(16), default='female')   # 'female' | 'male' — dari ASSET_PACKS[pack]['variants']
+    skin_key    = db.Column(db.String(32), default='default')
+    hair_key    = db.Column(db.String(32), default='default')
+    outfit_key  = db.Column(db.String(32), default='default')
+    hat_key     = db.Column(db.String(32), nullable=True)     # None = tidak pakai topi
+
+    # Stat dasar petualangan (dipakai mode hutan — fase berikutnya)
+    stamina     = db.Column(db.Integer, default=100)
+    stamina_max = db.Column(db.Integer, default=100)
+
+    created_at  = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at  = db.Column(db.DateTime, default=datetime.utcnow)
+
+    skills      = db.relationship('CharacterSkill', backref='character', lazy='dynamic', cascade='all,delete')
+    equipment   = db.relationship('CharacterEquipment', backref='character', lazy='dynamic', cascade='all,delete')
+
+    def get_skill(self, skill_key):
+        return self.skills.filter_by(skill_key=skill_key).first()
+
+    def add_skill_xp(self, skill_key, amount):
+        """Tambah XP skill tertentu, auto level-up. Return (skill, leveled_up)."""
+        from character_catalog import SKILL_CATALOG
+        sk = self.get_skill(skill_key)
+        if not sk:
+            sk = CharacterSkill(character_id=self.id, skill_key=skill_key, level=1, xp=0)
+            db.session.add(sk)
+            db.session.flush()
+
+        info = SKILL_CATALOG.get(skill_key, {})
+        max_level = info.get('max_level', 20)
+        leveled_up = False
+        sk.xp += amount
+        while sk.level < max_level and sk.xp >= sk.level * 100:
+            sk.xp -= sk.level * 100
+            sk.level += 1
+            leveled_up = True
+        return sk, leveled_up
+
+
+class CharacterSkill(db.Model):
+    """Progres tiap skill petualangan (menebang, meramu, bertarung, dst)."""
+    __tablename__ = 'character_skills'
+    id           = db.Column(db.Integer, primary_key=True)
+    character_id = db.Column(db.Integer, db.ForeignKey('characters.id'), nullable=False)
+    skill_key    = db.Column(db.String(32), nullable=False)   # lihat character_catalog.SKILL_CATALOG
+    level        = db.Column(db.Integer, default=1)
+    xp           = db.Column(db.Integer, default=0)
+
+    __table_args__ = (
+        db.UniqueConstraint('character_id', 'skill_key', name='uq_char_skill'),
+    )
+
+
+class CharacterEquipment(db.Model):
+    """
+    Slot yang sedang dipakai karakter (tas petualangan tetap memakai
+    tabel InventoryItem yang sudah ada — tabel ini cuma menandai item
+    mana dari tas yang lagi 'dipakai' di slot tertentu, tanpa menduplikasi
+    data item itu sendiri).
+    """
+    __tablename__ = 'character_equipment'
+    id           = db.Column(db.Integer, primary_key=True)
+    character_id = db.Column(db.Integer, db.ForeignKey('characters.id'), nullable=False)
+    slot         = db.Column(db.String(16), nullable=False)   # weapon|tool|head|body|bag
+    item_key     = db.Column(db.String(64), nullable=False)   # cocok dengan InventoryItem.item_key
+
+    __table_args__ = (
+        db.UniqueConstraint('character_id', 'slot', name='uq_char_slot'),
+    )
+
+class HomeDecor(db.Model):
+    """Dekorasi yang ditaruh pemain di halaman rumah virtual (map_key='home')."""
+    __tablename__ = 'home_decor'
+    id       = db.Column(db.Integer, primary_key=True)
+    user_id  = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    item_key = db.Column(db.String(32), nullable=False)   # lihat character_catalog.DECOR_CATALOG
+    pos_x    = db.Column(db.Integer, nullable=False)
+    pos_y    = db.Column(db.Integer, nullable=False)
+
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'pos_x', 'pos_y', name='uq_decor_pos'),
+    )
+
+class ForestState(db.Model):
+    """
+    Progres harian mode petualangan hutan — titik sumber daya mana yang
+    sudah 'dipanen' hari ini, dan kapan terakhir di-reset. Stamina
+    sendiri tetap dari Character.stamina (di-reset ke max di sini saat
+    hari berganti), jadi tidak duplikasi data.
+    """
+    __tablename__ = 'forest_state'
+    id             = db.Column(db.Integer, primary_key=True)
+    user_id        = db.Column(db.Integer, db.ForeignKey('users.id'), unique=True, nullable=False)
+    date           = db.Column(db.Date, default=date.today)
+    consumed_nodes = db.Column(db.Text, default='')   # CSV node id, mis. "3_5,7_2,10_11"

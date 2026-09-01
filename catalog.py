@@ -183,6 +183,20 @@ SHOP_ITEMS = {
     "menara_sarang":    {"name":"Menara Sarang","type":"deco","price":2800,"rarity":"epic","desc":"Tambah 2 slot kandang"},
     "patung_garuda":    {"name":"Patung Garuda","type":"deco","price":15000,"rarity":"legendary","desc":"Hewan Legendary lebih sering"},
     "altar_naga":       {"name":"Altar Naga Kuno","type":"deco","price":50000,"rarity":"mythic","desc":"Hewan Mythic bisa datang"},
+    # DEKO LAHAN
+    "pagar_kayu":       {"name":"Pagar Kayu","type":"deco","price":150,"rarity":"common","desc":"Penanda batas lahan"},
+    "bangku_taman":     {"name":"Bangku Taman","type":"deco","price":200,"rarity":"common","desc":"Tempat duduk santai di kebun"},
+    "sumur_tua":        {"name":"Sumur Tua","type":"deco","price":350,"rarity":"uncommon","desc":"Hiasan klasik kebun pedesaan"},
+    "pot_bunga":        {"name":"Pot Bunga","type":"deco","price":120,"rarity":"common","desc":"Sentuhan warna-warni di halaman"},
+    "batu_hias":        {"name":"Batu Hias","type":"deco","price":100,"rarity":"common","desc":"Penataan taman ala zen"},
+    "kolam_mini":       {"name":"Kolam Mini","type":"deco","price":900,"rarity":"rare","desc":"Kolam kecil penyejuk kebun"},
+    "ayunan_kayu":      {"name":"Ayunan Kayu","type":"deco","price":500,"rarity":"uncommon","desc":"Ayunan santai di bawah pohon"},
+    "gerbang_bambu":    {"name":"Gerbang Bambu","type":"deco","price":700,"rarity":"uncommon","desc":"Pintu masuk lahan yang asri"},
+    # DEKO RUMAH
+    "keset_selamat":    {"name":"Keset Selamat Datang","type":"deco","price":80,"rarity":"common","desc":"Sambutan hangat di depan pintu"},
+    "karangan_bunga":   {"name":"Karangan Bunga Pintu","type":"deco","price":250,"rarity":"uncommon","desc":"Hiasan pintu rumah"},
+    "kotak_bunga":      {"name":"Kotak Bunga Jendela","type":"deco","price":220,"rarity":"uncommon","desc":"Mempercantik jendela pondok"},
+    "lampion_gerbang":  {"name":"Lampion Gerbang","type":"deco","price":400,"rarity":"rare","desc":"Penerangan hangat jalan masuk"},
     # JIMAT
     "kristal_waktu":    {"name":"Kristal Waktu","type":"amulet","price":1800,"rarity":"epic","desc":"Pohon tumbuh 2x lebih cepat 24 jam"},
     "batu_nasib":       {"name":"Batu Nasib Emas","type":"amulet","price":5000,"rarity":"legendary","desc":"Peluang Epic/Legendary 3x, 7 hari"},

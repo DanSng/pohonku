@@ -28,8 +28,30 @@ def create_app(env='production'):
 
     @app.context_processor
     def inject_globals():
+        # --- PERBAIKAN RANKING ---
+        # Fungsi ini di-inject secara global, dipanggil hanya saat halaman butuh ranking
+        def get_leaderboards():
+            # 1. Ranking XP (Tanpa N+1, ambil 10 teratas)
+            top_xp = User.query.filter_by(role='user', is_banned=False)\
+                         .order_by(User.level.desc(), User.xp.desc())\
+                         .limit(10).all()
+                         
+            # 2. Ranking DNS (JOIN langsung dengan Wallet agar memori tidak crash)
+            top_dns = db.session.query(User).join(Wallet)\
+                          .filter(User.role == 'user', User.is_banned == False)\
+                          .order_by(Wallet.balance.desc())\
+                          .limit(10).all()
+                          
+            # 3. Ranking O2 Kumulatif
+            top_o2 = User.query.filter_by(role='user', is_banned=False)\
+                         .order_by(User.o2_total.desc())\
+                         .limit(10).all()
+            
+            return {"top_xp": top_xp, "top_dns": top_dns, "top_o2": top_o2}
+
         return dict(cat=cat, NEST_TYPES=__import__('models').NEST_TYPES,
-                    now=datetime.utcnow(), today=date.today())
+                    now=datetime.utcnow(), today=date.today(),
+                    get_leaderboards=get_leaderboards)
 
     # Register blueprints
     from routes.auth   import auth_bp
@@ -40,42 +62,90 @@ def create_app(env='production'):
     from routes.wallet import wallet_bp
     from routes.api    import api_bp
     from routes.admin  import admin_bp
+    
     # Blueprint opsional — tidak crash jika file tidak ada
+    try:
+        from routes.leaderboard import lb_bp
+        app.register_blueprint(lb_bp)
+    except Exception as e:
+        print(f'[skip] leaderboard_bp: {e}')
+    try:
+        from routes.rimba_run import rimba_bp
+        app.register_blueprint(rimba_bp, url_prefix='')
+    except Exception as e:
+        print(f'[skip] rimba_bp: {e}')
+        
     try:
         from routes.story import story_bp
         app.register_blueprint(story_bp, url_prefix='')
     except Exception as e:
         print(f'[skip] story_bp: {e}')
+        
     try:
         from routes.benih_blast import blast_bp
         app.register_blueprint(blast_bp, url_prefix='')
     except Exception as e:
         print(f'[skip] blast_bp: {e}')
+
+    try:
+        from routes.merge_benih import merge_bp
+        app.register_blueprint(merge_bp, url_prefix='')
+    except Exception as e:
+        print(f'[skip] merge_bp: {e}')
+
+    try:
+        from routes.lari_hutan import lari_bp
+        app.register_blueprint(lari_bp, url_prefix='')
+    except Exception as e:
+        print(f'[skip] lari_bp: {e}')
+        
     try:
         from routes.streak import streak_bp
         app.register_blueprint(streak_bp, url_prefix='')
     except Exception as e:
         print(f"[skip] streak_bp: {e}")
+        
     try:
         from routes.wallet_pin import pin_bp
         app.register_blueprint(pin_bp, url_prefix='')
     except Exception as e:
         print(f'[skip] pin_bp: {e}')
+        
     try:
         from routes.dns_shop import shop_bp
         app.register_blueprint(shop_bp, url_prefix='')
     except Exception as e:
         print(f'[skip] shop_bp: {e}')
+        
     try:
         from routes.proximity import prox_bp
         app.register_blueprint(prox_bp, url_prefix='')
     except Exception as e:
         print(f'[skip] prox_bp: {e}')
+        
     try:
         from routes.pubmap import pubmap_bp
         app.register_blueprint(pubmap_bp, url_prefix='')
     except Exception as e:
         print(f"[skip] pubmap_bp: {e}")
+
+    try:
+        from routes.mining import mining_bp
+        app.register_blueprint(mining_bp, url_prefix='')
+    except Exception as e:
+        print(f'[skip] mining_bp: {e}')
+
+    try:
+        from routes.character import character_bp
+        app.register_blueprint(character_bp, url_prefix='')
+    except Exception as e:
+        print(f'[skip] character_bp: {e}')
+
+    try:
+        from routes.forest import forest_bp
+        app.register_blueprint(forest_bp, url_prefix='')
+    except Exception as e:
+        print(f'[skip] forest_bp: {e}')
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(main_bp)
@@ -90,8 +160,6 @@ def create_app(env='production'):
     def format_num(value):
         try: return f"{int(value):,}".replace(',','.')
         except: return str(value)
-
-
 
     @app.after_request
     def security_headers(response):
